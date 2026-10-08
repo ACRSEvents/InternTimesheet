@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  SECURITY: Content Security Policy.
+  Only allows scripts from this page itself and Jotform's official widget script.
+  Blocks plugins, outside images, form posting elsewhere, and <base> tag tricks.
+  If the widget ever fails to load inside Jotform, try removing this one line first.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://js.jotform.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.jotform.com; img-src 'self' data:; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Intern Timesheet</title>
+
+<!-- Jotform's official Custom Widget API (lets this page send data to your form) -->
+<script src="https://js.jotform.com/JotFormCustomWidget.min.js"></script>
+
+<style>
+  :root {
+    --blue: #1f5fb4;
+    --blue-soft: #eaf1fb;
+    --line: #d6dbe3;
+    --text: #1d2533;
+    --muted: #5f6b7a;
+    --bad: #b42318;
+    --warn: #8a5a00;
+    --today: #fff4d6;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--text); background: #fff; }
+  #app { padding: 8px; }
+
+  .topbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; justify-content: space-between; margin-bottom: 12px; }
+  .topbar label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  select, input { font: inherit; color: inherit; border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; background: #fff; min-height: 34px; }
+  select:focus, input:focus, button:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+  .grand { background: var(--blue); color: #fff; border-radius: 8px; padding: 8px 14px; font-weight: 600; }
+  .grand span { font-size: 20px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+
+  .week { margin-bottom: 16px; }
+  .week-head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid var(--blue); padding: 4px 0; margin-bottom: 6px; }
+  .week-head h3 { margin: 0; font-size: 15px; }
+  .week-total { font-weight: 600; }
+  .wkmsg { font-size: 12px; color: var(--warn); margin: 2px 0 6px; }
+
+  /* Narrow screens / default Jotform width: one row per day */
+  .grid { display: grid; grid-template-columns: 1fr; gap: 6px; }
+  .day { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: grid; grid-template-columns: 92px 1fr; gap: 8px; cursor: pointer; background: #fff; }
+  .day:hover { border-color: var(--blue); }
+  .day.wkend { background: #fafbfc; }
+  .day.today { background: var(--today); }
+  .day-head .dow { display: block; font-weight: 700; }
+  .day-head .date { display: block; }
+  .day-total { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .empty { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+
+  .shift { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-end; padding: 6px; background: var(--blue-soft); border-radius: 6px; margin-bottom: 6px; cursor: default; }
+  .fld { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); }
+  .fld input[type=time] { width: 118px; }
+  .hrs { font-weight: 700; min-width: 54px; padding-bottom: 7px; }
+  .rm { border: none; background: none; color: var(--bad); font-size: 20px; line-height: 1; cursor: pointer; margin-left: auto; padding: 4px 6px; }
+  .add { border: 1px dashed var(--blue); background: none; color: var(--blue); border-radius: 6px; padding: 5px 8px; cursor: pointer; font: inherit; }
+  .msg { font-size: 12px; color: var(--bad); width: 100%; }
+  .msg.warn { color: var(--warn); }
+  .msg:empty { display: none; }
+
+  #errors { border: 1px solid var(--bad); color: var(--bad); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+  #errors ul { margin: 4px 0 0; padding-left: 18px; }
+  #preview { border-top: 1px dashed var(--line); margin-top: 12px; padding-top: 8px; }
+  #preview pre { background: #f5f6f8; padding: 8px; border-radius: 6px; white-space: pre-wrap; font-size: 12px; }
+
+  /* Wide form (about 980px+): Dayforce-style, one column per day */
+  @media (min-width: 980px) {
+    .grid { grid-template-columns: repeat(7, 1fr); }
+    .day { display: block; min-height: 130px; }
+    .day-head { background: var(--blue-soft); margin: -8px -8px 8px; padding: 6px 8px; border-radius: 8px 8px 0 0; text-align: center; }
+    .day.today .day-head { background: #ffe39a; }
+    .day-head .dow, .day-head .date { display: inline; }
+    .fld, .fld input[type=time], .fld select { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="topbar">
+    <div>
+      <label for="period">Pay period</label>
+      <select id="period"></select>
+    </div>
+    <div class="grand">Total: <span id="grandTotal">0.00</span> hrs</div>
+  </div>
+  <p class="hint">Click a day (or "+ Add shift") to add a shift. New shifts copy the times you last entered, so you can fill in repeat days quickly.</p>
+
+  <div class="week">
+    <div class="week-head"><h3 id="w1label">Week 1</h3><span class="week-total"><span id="w1total">0.00</span> hrs</span></div>
+    <div class="wkmsg" id="w1msg"></div>
+    <div class="grid" id="grid1"></div>
+  </div>
+  <div class="week">
+    <div class="week-head"><h3 id="w2label">Week 2</h3><span class="week-total"><span id="w2total">0.00</span> hrs</span></div>
+    <div class="wkmsg" id="w2msg"></div>
+    <div class="grid" id="grid2"></div>
+  </div>
+
+  <div id="errors" role="alert" hidden></div>
+
+  <!-- Only shows when you open this file directly in a browser (not inside Jotform) -->
+  <div id="preview" hidden>
+    <strong>Preview mode</strong> (you are viewing this outside Jotform)
+    <div><button type="button" class="add" id="previewBtn">Preview what will be saved</button></div>
+    <pre id="previewOut"></pre>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ================= SETTINGS YOU CAN CHANGE ================= */
+  // Any known pay period start date. Every period is 14 days from here.
+  const ANCHOR = { year: 2026, month: 10, day: 3 }; // Saturday, Oct 3, 2026
+  const PERIOD_DAYS = 14;
+  const MAX_SHIFTS_PER_DAY = 4;
+  const LONG_DAY_HOURS = 10;      // warn (not block) above this many hours in a day
+  const WEEK_WARN_HOURS = 40;     // warn (not block) above this many hours in a week
+  const BREAK_OPTIONS = [0, 15, 30, 45, 60]; // unpaid break choices, in minutes
+  /* ========================================================== */
+
+  const DAY_MS = 86400000;
+  // Dates are handled in UTC on purpose so daylight saving time never shifts a day.
+  const anchorUTC = Date.UTC(ANCHOR.year, ANCHOR.month - 1, ANCHOR.day);
+  const JF = (typeof window.JFCustomWidget !== "undefined") ? window.JFCustomWidget : null;
+  const $ = (id) => document.getElementById(id);
+
+  function todayUTC() {
+    const n = new Date(); // intern's local date
+    return Date.UTC(n.getFullYear(), n.getMonth(), n.getDate());
+  }
+  function periodStartFor(utcMs) {
+    const diffDays = Math.round((utcMs - anchorUTC) / DAY_MS);
+    return anchorUTC + Math.floor(diffDays / PERIOD_DAYS) * PERIOD_DAYS * DAY_MS;
+  }
+  function fmt(ms, opts) {
+    return new Date(ms).toLocaleDateString("en-US", Object.assign({ timeZone: "UTC" }, opts));
+  }
+  function shortRange(startMs, days) {
+    const end = startMs + (days - 1) * DAY_MS;
+    return fmt(startMs, { month: "short", day: "numeric" }) + " to " + fmt(end, { month: "short", day: "numeric" });
+  }
+  function dayLabel(i) {
+    return fmt(state.periodStart + i * DAY_MS, { weekday: "short", month: "short", day: "numeric" });
+  }
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text; // SECURITY: textContent, never innerHTML
+    return e;
+  }
+  function toMinutes(t) { // "HH:MM" -> minutes after midnight, or null if not a real time
+    if (typeof t !== "string" || !/^\d{2}:\d{2}$/.test(t)) return null;
+    const h = Number(t.slice(0, 2)), m = Number(t.slice(3, 5));
+    if (h > 23 || m > 59) return null;
+    return h * 60 + m;
+  }
+  function to12h(t) {
+    const total = toMinutes(t);
+    const h = Math.floor(total / 60), m = total % 60;
+    return (h % 12 || 12) + ":" + String(m).padStart(2, "0") + " " + (h < 12 ? "AM" : "PM");
+  }
+  const hrs = (min) => (min / 60).toFixed(2);
+
+  /* ---------- State ---------- */
+  const currentPeriod = periodStartFor(todayUTC());
+  const allowedPeriods = [currentPeriod - PERIOD_DAYS * DAY_MS, currentPeriod]; // previous + current
+  const state = { periodStart: currentPeriod, byPeriod: {}, lastShift: null };
+  let refs = []; // links to on-screen elements for each day
+
+  function currentDays() {
+    const key = String(state.periodStart);
+    if (!state.byPeriod[key]) state.byPeriod[key] = Array.from({ length: PERIOD_DAYS }, () => []);
+    return state.byPeriod[key];
+  }
+
+  /* ---------- Pay period picker ---------- */
+  function setupPeriods() {
+    const sel = $("period");
+    allowedPeriods.forEach((start) => {
+      const end = start + (PERIOD_DAYS - 1) * DAY_MS;
+      const opt = document.createElement("option");
+      opt.value = String(start);
+      opt.textContent = fmt(start, { month: "short", day: "numeric" }) + " to " +
+        fmt(end, { month: "short", day: "numeric", year: "numeric" }) +
+        (start === currentPeriod ? " (current)" : " (previous)");
+      sel.appendChild(opt);
+    });
+    sel.value = String(currentPeriod);
+    sel.addEventListener("change", () => {
+      const v = Number(sel.value);
+      // SECURITY: only accept periods we generated, even if someone edits the page
+      state.periodStart = allowedPeriods.includes(v) ? v : currentPeriod;
+      render();
+    });
+  }
+
+  /* ---------- Drawing the calendar ---------- */
+  function render() {
+    const days = currentDays();
+    const today = todayUTC();
+    const grids = [$("grid1"), $("grid2")];
+    grids.forEach((g) => { g.textContent = ""; });
+    refs = [];
+
+    $("w1label").textContent = "Week 1 (" + shortRange(state.periodStart, 7) + ")";
+    $("w2label").textContent = "Week 2 (" + shortRange(state.periodStart + 7 * DAY_MS, 7) + ")";
+
+    days.forEach((shifts, i) => {
+      const dayMs = state.periodStart + i * DAY_MS;
+      const dow = new Date(dayMs).getUTCDay();
+      const card = el("div", "day" + (dow === 0 || dow === 6 ? " wkend" : "") + (dayMs === today ? " today" : ""));
+      card.title = "Click to add a shift";
+
+      const head = el("div", "day-head");
+      head.appendChild(el("span", "dow", fmt(dayMs, { weekday: "short" }) + " "));
+      head.appendChild(el("span", "date", fmt(dayMs, { month: "short", day: "numeric" })));
+      const totalEl = el("span", "day-total", "0.00 hrs");
+      head.appendChild(totalEl);
+      card.appendChild(head);
+
+      const body = el("div", "day-body");
+      const r = { totalEl: totalEl, msgEl: null, shifts: [] };
+      if (shifts.length === 0) body.appendChild(el("div", "empty", "No shifts"));
+      shifts.forEach((shift, j) => body.appendChild(shiftRow(i, j, shift, r)));
+      r.msgEl = el("div", "msg");
+      body.appendChild(r.msgEl);
+
+      if (shifts.length < MAX_SHIFTS_PER_DAY) {
+        const add = el("button", "add", "+ Add shift");
+        add.type = "button";
+        add.addEventListener("click", (e) => { e.stopPropagation(); addShift(i); });
+        body.appendChild(add);
+      }
+      card.appendChild(body);
+
+      // Clicking empty space on a day adds a shift
+      card.addEventListener("click", (e) => {
+        if (e.target.closest(".shift, button, .msg")) return;
+        addShift(i);
+      });
+
+      refs.push(r);
+      grids[i < 7 ? 0 : 1].appendChild(card);
+    });
+    updateTotals();
+  }
+
+  function shiftRow(i, j, shift, r) {
+    const row = el("div", "shift");
+    const save = () => { remember(shift); updateTotals(); };
+    const start = timeField("Start", shift.start, (v) => { shift.start = v; save(); });
+    const end = timeField("End", shift.end, (v) => { shift.end = v; save(); });
+    const brk = breakField(shift.brk, (v) => { shift.brk = v; save(); });
+    const hrsEl = el("span", "hrs", "--");
+    const rm = el("button", "rm", "\u00d7");
+    rm.type = "button";
+    rm.setAttribute("aria-label", "Remove this shift");
+    rm.title = "Remove this shift";
+    rm.addEventListener("click", () => { currentDays()[i].splice(j, 1); render(); });
+    const msg = el("div", "msg");
+    [start, end, brk, hrsEl, rm, msg].forEach((x) => row.appendChild(x));
+    r.shifts.push({ hrsEl: hrsEl, msgEl: msg, startInput: start.querySelector("input") });
+    return row;
+  }
+
+  function timeField(label, value, onChange) {
+    const wrap = el("label", "fld");
+    wrap.appendChild(el("span", null, label));
+    const inp = document.createElement("input");
+    inp.type = "time";
+    inp.step = 300; // 5 minute steps
+    inp.value = value || "";
+    inp.addEventListener("input", () => onChange(inp.value));
+    inp.addEventListener("change", () => onChange(inp.value));
+    wrap.appendChild(inp);
+    return wrap;
+  }
+
+  function breakField(value, onChange) {
+    const wrap = el("label", "fld");
+    wrap.appendChild(el("span", null, "Unpaid break"));
+    const sel = document.createElement("select");
+    BREAK_OPTIONS.forEach((m) => {
+      const o = document.createElement("option");
+      o.value = String(m);
+      o.textContent = m === 0 ? "None" : m + " min";
+      sel.appendChild(o);
+    });
+    sel.value = String(value || 0);
+    sel.addEventListener("change", () => {
+      const v = Number(sel.value);
+      onChange(BREAK_OPTIONS.includes(v) ? v : 0); // SECURITY: only allow listed values
+    });
+    wrap.appendChild(sel);
+    return wrap;
+  }
+
+  function remember(shift) {
+    if (toMinutes(shift.start) !== null && toMinutes(shift.end) !== null) {
+      state.lastShift = { start: shift.start, end: shift.end, brk: shift.brk || 0 };
+    }
+  }
+
+  function addShift(i) {
+    const day = currentDays()[i];
+    if (day.length >= MAX_SHIFTS_PER_DAY) return;
+    const base = state.lastShift || { start: "", end: "", brk: 0 };
+    day.push({ start: base.start, end: base.end, brk: base.brk });
+    render();
+    const s = refs[i].shifts;
+    if (s.length) s[s.length - 1].startInput.focus();
+  }
+
+  /* ---------- Math and checks ---------- */
+  function shiftMinutes(sh) {
+    const s = toMinutes(sh.start), e = toMinutes(sh.end);
+    if (s === null || e === null) return { err: "Enter a start and end time." };
+    if (e <= s) return { err: "End time must be after start time." };
+    const worked = e - s - (sh.brk || 0);
+    if (worked <= 0) return { err: "Break is longer than the shift." };
+    return { min: worked };
+  }
+
+  function analyze() {
+    const out = { days: [], week: [0, 0], total: 0, errors: [] };
+    currentDays().forEach((shifts, i) => {
+      let dayMin = 0, dayErr = "", warn = "";
+      const res = shifts.map(shiftMinutes);
+      res.forEach((x) => {
+        if (x.err) out.errors.push(dayLabel(i) + ": " + x.err);
+        else dayMin += x.min;
+      });
+      // Overlapping shifts on the same day are not allowed
+      const ok = shifts
+        .map((sh, k) => ({ s: toMinutes(sh.start), e: toMinutes(sh.end), good: !res[k].err }))
+        .filter((v) => v.good)
+        .sort((a, b) => a.s - b.s);
+      for (let k = 1; k < ok.length; k++) {
+        if (ok[k].s < ok[k - 1].e) dayErr = "These shifts overlap.";
+      }
+      if (dayErr) out.errors.push(dayLabel(i) + ": " + dayErr);
+      else if (dayMin > LONG_DAY_HOURS * 60) warn = "Over " + LONG_DAY_HOURS + " hours. Please double-check.";
+
+      out.days.push({ min: dayMin, res: res, dayErr: dayErr, warn: warn });
+      out.week[i < 7 ? 0 : 1] += dayMin;
+      out.total += dayMin;
+    });
+    return out;
+  }
+
+  function updateTotals() {
+    const a = analyze();
+    a.days.forEach((d, i) => {
+      const r = refs[i];
+      if (!r) return;
+      r.totalEl.textContent = hrs(d.min) + " hrs";
+      d.res.forEach((x, k) => {
+        const s = r.shifts[k];
+        if (!s) return;
+        s.hrsEl.textContent = x.err ? "--" : hrs(x.min) + " h";
+        s.msgEl.textContent = x.err || "";
+      });
+      r.msgEl.textContent = d.dayErr || d.warn;
+      r.msgEl.className = "msg" + (d.dayErr ? "" : " warn");
+    });
+    $("w1total").textContent = hrs(a.week[0]);
+    $("w2total").textContent = hrs(a.week[1]);
+    $("grandTotal").textContent = hrs(a.total);
+    $("w1msg").textContent = a.week[0] > WEEK_WARN_HOURS * 60 ? "Over " + WEEK_WARN_HOURS + " hours this week. Check with your supervisor." : "";
+    $("w2msg").textContent = a.week[1] > WEEK_WARN_HOURS * 60 ? "Over " + WEEK_WARN_HOURS + " hours this week. Check with your supervisor." : "";
+    if (!$("errors").hidden) showErrors(a.errors); // keep error box current once shown
+    resize();
+  }
+
+  /* ---------- What gets saved in Jotform ---------- */
+  function buildValue(a) {
+    const start = state.periodStart;
+    const end = start + (PERIOD_DAYS - 1) * DAY_MS;
+    const longDate = { weekday: "short", month: "short", day: "numeric", year: "numeric" };
+    const lines = [
+      "TOTAL HOURS: " + hrs(a.total),
+      "PAY PERIOD: " + fmt(start, longDate) + " to " + fmt(end, longDate),
+      "Week 1 (" + shortRange(start, 7) + "): " + hrs(a.week[0]) + " hrs",
+      "Week 2 (" + shortRange(start + 7 * DAY_MS, 7) + "): " + hrs(a.week[1]) + " hrs",
+      "----------------------------------------"
+    ];
+    currentDays().forEach((shifts, i) => {
+      const dayMs = start + i * DAY_MS;
+      shifts
+        .map((sh, k) => ({ sh: sh, x: a.days[i].res[k] }))
+        .filter((o) => !o.x.err)
+        .sort((p, q) => toMinutes(p.sh.start) - toMinutes(q.sh.start))
+        .forEach((o) => {
+          lines.push(
+            fmt(dayMs, { weekday: "short", month: "2-digit", day: "2-digit", year: "numeric" }) +
+            " | " + to12h(o.sh.start) + " to " + to12h(o.sh.end) +
+            " | break " + (o.sh.brk || 0) + " min | " + hrs(o.x.min) + " hrs"
+          );
+        });
+    });
+    return lines.join("\n");
+  }
+
+  function buildSubmission() {
+    const a = analyze();
+    const errors = a.errors.slice();
+    if (a.total === 0 && errors.length === 0) errors.push("Add at least one shift before submitting.");
+    return { valid: errors.length === 0, value: errors.length ? "" : buildValue(a), errors: errors };
+  }
+
+  function showErrors(errors) {
+    const box = $("errors");
+    box.textContent = "";
+    if (!errors.length) { box.hidden = true; resize(); return; }
+    box.appendChild(el("strong", null, "Please fix before submitting:"));
+    const ul = el("ul");
+    errors.forEach((msg) => ul.appendChild(el("li", null, msg)));
+    box.appendChild(ul);
+    box.hidden = false;
+    resize();
+  }
+
+  function resize() {
+    if (JF && JF.requestFrameResize) {
+      JF.requestFrameResize({ height: $("app").offsetHeight + 24 });
+    }
+  }
+
+  /* ---------- Start up ---------- */
+  setupPeriods();
+  render();
+
+  if (JF) {
+    JF.subscribe("ready", () => resize());
+    JF.subscribe("submit", () => {
+      const r = buildSubmission();
+      showErrors(r.errors);
+      JF.sendSubmit({ valid: r.valid, value: r.value });
+    });
+  } else {
+    $("preview").hidden = false;
+    $("previewBtn").addEventListener("click", () => {
+      const r = buildSubmission();
+      showErrors(r.errors);
+      $("previewOut").textContent = r.valid ? r.value : "(Fix the errors above first.)";
+    });
+  }
+})();
+</script>
+</body>
+</html>
