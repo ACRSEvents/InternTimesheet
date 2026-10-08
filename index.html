@@ -126,6 +126,16 @@
   const LONG_DAY_HOURS = 10;      // warn (not block) above this many hours in a day
   const WEEK_WARN_HOURS = 40;     // warn (not block) above this many hours in a week
   const BREAK_OPTIONS = [0, 15, 30, 45, 60]; // unpaid break choices, in minutes
+
+  // Jotform field IDs of the hidden Short Text fields the widget fills in.
+  // Find an ID in the form builder: click the field > gear icon > Advanced > Field Details.
+  // "input_7" means the ID is "7". Leave a field as "" to skip it.
+  const FIELD_IDS = {
+    payPeriod:  "",   // e.g. "10/03/2026 to 10/16/2026"
+    totalHours: "",   // e.g. "20.50"
+    week1Hours: "",   // optional
+    week2Hours: ""    // optional
+  };
   /* ========================================================== */
 
   const DAY_MS = 86400000;
@@ -379,6 +389,7 @@
     $("w1msg").textContent = a.week[0] > WEEK_WARN_HOURS * 60 ? "Over " + WEEK_WARN_HOURS + " hours this week. Check with your supervisor." : "";
     $("w2msg").textContent = a.week[1] > WEEK_WARN_HOURS * 60 ? "Over " + WEEK_WARN_HOURS + " hours this week. Check with your supervisor." : "";
     if (!$("errors").hidden) showErrors(a.errors); // keep error box current once shown
+    schedulePush(a);
     resize();
   }
 
@@ -430,6 +441,42 @@
     resize();
   }
 
+  /* ---------- Copy summary into separate Jotform fields ---------- */
+  function summary(a) {
+    const start = state.periodStart;
+    const end = start + (PERIOD_DAYS - 1) * DAY_MS;
+    const d = { month: "2-digit", day: "2-digit", year: "numeric" };
+    const ok = a.errors.length === 0 && a.total > 0;
+    return {
+      payPeriod: fmt(start, d) + " to " + fmt(end, d),
+      totalHours: ok ? hrs(a.total) : "",
+      week1Hours: ok ? hrs(a.week[0]) : "",
+      week2Hours: ok ? hrs(a.week[1]) : ""
+    };
+  }
+
+  let lastSent = "";
+  function pushToFields(a) {
+    if (!JF || typeof JF.setFieldsValueById !== "function") return;
+    const s = summary(a);
+    const list = [];
+    Object.keys(FIELD_IDS).forEach((key) => {
+      const id = String(FIELD_IDS[key]).trim();
+      // SECURITY: only plain numeric IDs are sent to the form
+      if (/^\d{1,4}$/.test(id)) list.push({ id: id, value: s[key] });
+    });
+    const sig = JSON.stringify(list);
+    if (!list.length || sig === lastSent) return;
+    lastSent = sig;
+    try { JF.setFieldsValueById(list); } catch (e) { /* widget still works without it */ }
+  }
+
+  let pushTimer = null;
+  function schedulePush(a) {
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(() => pushToFields(a), 300);
+  }
+
   function resize() {
     if (JF && JF.requestFrameResize) {
       JF.requestFrameResize({ height: $("app").offsetHeight + 24 });
@@ -441,10 +488,12 @@
   render();
 
   if (JF) {
-    JF.subscribe("ready", () => resize());
+    JF.subscribe("ready", () => { resize(); lastSent = ""; pushToFields(analyze()); });
     JF.subscribe("submit", () => {
       const r = buildSubmission();
       showErrors(r.errors);
+      clearTimeout(pushTimer);
+      pushToFields(analyze());
       JF.sendSubmit({ valid: r.valid, value: r.value });
     });
   } else {
